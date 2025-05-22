@@ -1,5 +1,11 @@
-from flask import Flask, request, render_template
+from flask import Flask, request, render_template, jsonify
 from PyPDF2 import PdfReader
+from datetime import datetime
+from dateutil import parser as date_parser
+import spacy
+import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 import re
 import pickle
@@ -11,6 +17,218 @@ rf_classifier_categorization = pickle.load(open('models/rf_classifier_categoriza
 tfidf_vectorizer_categorization = pickle.load(open('models/tfidf_vectorizer_categorization.pkl', 'rb'))
 rf_classifier_job_recommendation = pickle.load(open('models/rf_classifier_job_recommendation.pkl', 'rb'))
 tfidf_vectorizer_job_recommendation = pickle.load(open('models/tfidf_vectorizer_job_recommendation.pkl', 'rb'))
+
+# Resume ranker=========================================================================================================
+class ResumeRanker:
+    def __init__(self):
+        self.skill_weights = {
+            'technical_skills': 0.3,
+            'education': 0.2,
+            'experience_indicators': 0.2,
+            'job_match': 0.1
+            # 'contact_completeness': 0.05,
+            # 'soft_skills': 0.15,
+        }
+        
+        # Define skill categories
+        self.technical_skills = [
+            'Python', 'Java', 'JavaScript', 'C++', 'SQL', 'HTML', 'CSS', 'React', 'Angular', 
+            'Node.js', 'MongoDB', 'Machine Learning', 'Deep Learning', 'Data Analysis',
+            'TensorFlow', 'PyTorch', 'Git', 'Docker', 'Kubernetes', 'AWS', 'Azure', 'GCP'
+        ]
+        
+        self.experience_keywords = [
+            'years', 'experience', 'worked', 'developed', 'managed', 'led', 'created', 
+            'implemented', 'designed', 'built', 'achieved', 'improved', 'optimized'
+        ]
+        
+        self.education_levels = {
+            'PhD': 5, 'Doctorate': 5, 'Ph.D': 5,
+            'Master': 4, 'Masters': 4, 'M.S': 4, 'M.A': 4, 'MBA': 4,
+            'Bachelor': 3, 'Bachelors': 3, 'B.S': 3, 'B.A': 3, 'B.Tech': 3,
+            'Associate': 2, 'Diploma': 2,
+            'Certificate': 1
+        }
+
+    def calculate_technical_skills_score(self, skills):
+        """Calculate score based on technical skills"""
+        if not skills:
+            return 0
+        
+        technical_found = [skill for skill in skills if skill in self.technical_skills]
+        # Normalize score (max 100)
+        return min(len(technical_found) * 5, 100)
+    
+    def calculate_education_score(self, education):
+        """Calculate score based on education level"""
+        if not education:
+            return 0
+        
+        max_level = 0
+        for edu in education:
+            for level, score in self.education_levels.items():
+                if level.lower() in edu.lower():
+                    max_level = max(max_level, score)
+        
+        return (max_level / 5) * 100  # Normalize to 100
+    
+    def score_experience(exp_list):
+        score = 0
+        for exp in exp_list:
+            try:
+                start = date_parser.parse(exp["start_date"])
+                end = datetime.now() if "Present" in exp["end_date"] else date_parser.parse(exp["end_date"])
+                years = (end - start).days / 365
+
+                role = exp["title"].lower()
+                if "intern" in role:
+                    multiplier = 1.5
+                elif any(x in role for x in ["lead", "manager", "head"]):
+                    multiplier = 2.0
+                elif any(x in role for x in ["senior"]):
+                    multiplier = 1.7
+                else:
+                    multiplier = 1
+
+                score += years * multiplier
+            except:
+                continue
+        return min(score * 10, 100)  # Cap to 100
+
+    # below function not preferred as it is a simple keywords and pattern matching method
+    '''def calculate_experience_score(self, resume_text):  
+        """Calculate experience score based on keywords and patterns"""
+        experience_count = 0
+        
+        # Look for experience keywords
+        for keyword in self.experience_keywords:
+            experience_count += len(re.findall(r'\b' + keyword + r'\b', resume_text, re.IGNORECASE))
+        
+        # Look for year patterns (e.g., "3 years", "2+ years")
+        year_pattern = r'\b\d+\+?\s*years?\b'
+        year_matches = re.findall(year_pattern, resume_text, re.IGNORECASE)
+        
+        # Extract numerical values from year matches
+        total_years = 0
+        for match in year_matches:
+            numbers = re.findall(r'\d+', match)
+            if numbers:
+                total_years += int(numbers[0])
+        
+        # Combine keyword frequency and years mentioned
+        experience_score = min((experience_count * 2) + (total_years * 5), 100)
+        return experience_score'''
+
+    def score_projects(projects):
+        if not projects:
+            return 0
+        
+        # Load SpaCy model (this contains word vectors)
+        nlp = spacy.load('en_core_web_md')
+    
+        high_quality_examples = [
+            "Built an end-to-end ML pipeline using AWS Sagemaker and deployed using FastAPI.",
+            "Developed a scalable web application with React, Node.js, and MongoDB used by 10k+ users.",
+            "Created an AI chatbot using NLP and transformers to automate customer support."
+        ]
+    
+        # Convert examples to SpaCy docs with embeddings
+        example_docs = [nlp(example) for example in high_quality_examples]
+    
+        total_score = 0
+        for project in projects:
+            project_doc = nlp(project)
+        
+            # Calculate similarities with each example
+            similarities = [project_doc.similarity(example_doc) for example_doc in example_docs]
+            max_similarity = max(similarities)
+        
+            # Scale to 100
+            project_score = 100 * max_similarity
+            total_score += project_score
+    
+        avg_score = total_score / len(projects)
+        return min(round(avg_score, 2), 10)
+    
+    def calculate_job_match_score(self, resume_text, job_description=""):
+        """Calculate how well resume matches a job description"""
+        if not job_description:
+            return 50  # Default neutral score if no job description provided
+        
+        # Use TF-IDF to calculate similarity
+        vectorizer = TfidfVectorizer(stop_words='english', max_features=1000)
+        
+        try:
+            tfidf_matrix = vectorizer.fit_transform([resume_text, job_description])
+            similarity = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
+            return similarity * 100
+        except:
+            return 50  # Return neutral score if calculation fails
+    
+    def rank_resume(self, resume_data, job_description=""):
+        """Calculate overall ranking score for a resume"""
+        scores = {}
+        
+        # Calculate individual component scores
+        scores['technical_skills'] = self.calculate_technical_skills_score(resume_data.get('skills', []))
+        scores['projects'] = self.score_projects(resume_data.get('projects', []))
+        scores['education'] = self.calculate_education_score(resume_data.get('education', []))
+        scores['experience_indicators'] = self.score_experience(resume_data.get('text', ''))
+        scores['job_match'] = self.calculate_job_match_score(resume_data.get('text', ''), job_description)
+        
+        # Calculate weighted total score
+        total_score = sum(scores[component] * self.skill_weights[component] for component in scores)
+        
+        return {
+            'total_score': round(total_score, 2),
+            'component_scores': scores,
+            'grade': self.get_grade(total_score)
+        }
+    
+    def get_grade(self, score):
+        """Convert numerical score to letter grade"""
+        if score >= 90:
+            return 'A+'
+        elif score >= 85:
+            return 'A'
+        elif score >= 80:
+            return 'A-'
+        elif score >= 75:
+            return 'B+'
+        elif score >= 70:
+            return 'B'
+        elif score >= 65:
+            return 'B-'
+        elif score >= 60:
+            return 'C+'
+        elif score >= 55:
+            return 'C'
+        elif score >= 50:
+            return 'C-'
+        else:
+            return 'D'
+    
+    def rank_multiple_resumes(self, resumes, job_description=""):
+        """Rank multiple resumes and return sorted list"""
+        ranked_resumes = []
+        
+        for resume in resumes:
+            ranking = self.rank_resume(resume, job_description)
+            resume_with_ranking = resume.copy()
+            resume_with_ranking['ranking'] = ranking
+            ranked_resumes.append(resume_with_ranking)
+        
+        # Sort by total score (descending)
+        ranked_resumes.sort(key=lambda x: x['ranking']['total_score'], reverse=True)
+        
+        # Add rank position
+        for i, resume in enumerate(ranked_resumes):
+            resume['rank_position'] = i + 1
+        
+        return ranked_resumes
+
+# Initialize ranker
+ranker = ResumeRanker()
 
 # Clean resume==========================================================================================================
 def cleanResume(txt):
@@ -259,6 +477,41 @@ def pred():
                                phone=phone,name=name,email=email,extracted_skills=extracted_skills,extracted_education=extracted_education)
     else:
         return render_template("resume.html", message="No resume file uploaded.")
+    
+@app.route('/bulk_rank', methods=['POST'])
+def bulk_rank():
+    """Rank all uploaded resumes"""
+    if not resume_database:
+        return jsonify({'error': 'No resumes available for ranking'})
+    
+    job_description = request.form.get('job_description', '')
+    ranked_resumes = ranker.rank_multiple_resumes(resume_database, job_description)
+    
+    # Prepare response data
+    result = []
+    for resume in ranked_resumes:
+        result.append({
+            'filename': resume['filename'],
+            'name': resume['name'],
+            'rank_position': resume['rank_position'],
+            'total_score': resume['ranking']['total_score'],
+            'grade': resume['ranking']['grade'],
+            'component_scores': resume['ranking']['component_scores']
+        })
+    
+    return jsonify({'ranked_resumes': result})
+
+@app.route('/clear_database', methods=['POST'])
+def clear_database():
+    """Clear the resume database"""
+    global resume_database
+    resume_database = []
+    return jsonify({'message': 'Database cleared successfully'})
+
+@app.route('/ranking_dashboard')
+def ranking_dashboard():
+    """Display ranking dashboard"""
+    return render_template('ranking_dashboard.html', resumes=resume_database)
 
 if __name__ == '__main__':
     app.run(debug=True)
