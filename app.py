@@ -11,6 +11,8 @@ import re
 import pickle
 
 app = Flask(__name__)
+resume_database = []
+
 
 # Load models===========================================================================================================
 rf_classifier_categorization = pickle.load(open('models/rf_classifier_categorization.pkl', 'rb'))
@@ -25,7 +27,8 @@ class ResumeRanker:
             'technical_skills': 0.3,
             'education': 0.2,
             'experience_indicators': 0.2,
-            'job_match': 0.1
+            'job_match': 0.1,
+            'projects':0.2
             # 'contact_completeness': 0.05,
             # 'soft_skills': 0.15,
         }
@@ -72,7 +75,7 @@ class ResumeRanker:
         
         return (max_level / 5) * 100  # Normalize to 100
     
-    def score_experience(exp_list):
+    def score_experience(self,exp_list):
         score = 0
         for exp in exp_list:
             try:
@@ -119,7 +122,7 @@ class ResumeRanker:
         experience_score = min((experience_count * 2) + (total_years * 5), 100)
         return experience_score'''
 
-    def score_projects(projects):
+    def score_projects(self,projects):
         if not projects:
             return 0
         
@@ -430,6 +433,36 @@ def extract_education_from_resume(text):
 
     return education
 
+
+def extract_projects_from_resume(text):
+    project_keywords = ['projects', 'project experience', 'personal projects']
+    section_delimiters = ['experience', 'education', 'skills', 'certifications', 'summary', 'profile']
+
+    # Normalize text
+    lower_text = text.lower()
+
+    # Search for a project section
+    for keyword in project_keywords:
+        if keyword in lower_text:
+            start_idx = lower_text.index(keyword)
+            end_idx = len(text)
+
+            # Try to find where the next section begins
+            for delimiter in section_delimiters:
+                delimiter_idx = lower_text.find(delimiter, start_idx + len(keyword))
+                if delimiter_idx != -1:
+                    end_idx = min(end_idx, delimiter_idx)
+
+            # Extract and clean the section
+            project_section = text[start_idx:end_idx].strip()
+            lines = project_section.split('\n')
+            project_lines = [line.strip() for line in lines if len(line.strip()) > 20]
+
+            return project_lines[:5]
+
+    return []
+
+
 def extract_name_from_resume(text):
     name = None
 
@@ -472,6 +505,16 @@ def pred():
         extracted_skills = extract_skills_from_resume(text)
         extracted_education = extract_education_from_resume(text)
         name = extract_name_from_resume(text)
+        projects = extract_projects_from_resume(text)
+        resume_entry = {
+            'filename': filename,
+            'name': name,
+            'text': text,
+            'skills': extracted_skills,
+            'education': extracted_education,
+            'projects': projects
+        }
+        resume_database.append(resume_entry)
 
         return render_template('resume.html', predicted_category=predicted_category,recommended_job=recommended_job,
                                phone=phone,name=name,email=email,extracted_skills=extracted_skills,extracted_education=extracted_education)

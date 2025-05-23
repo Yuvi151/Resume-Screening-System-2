@@ -32,8 +32,10 @@
             align-items: center;
         }
 
-        input[type="file"] {
+        input[type="file"], textarea {
             margin-bottom: 20px;
+            width: 90%;
+            padding: 10px;
         }
 
         input[type="submit"] {
@@ -49,22 +51,34 @@
         input[type="submit"]:hover {
             background-color: #45a049;
         }
+
+        a.button-link {
+            display: inline-block;
+            margin-top: 20px;
+            padding: 10px 20px;
+            background-color: #0077cc;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+
+        a.button-link:hover {
+            background-color: #005fa3;
+        }
     </style>
 </head>
 
 <body>
     <div class="container" style="margin-top:20px;background:#013a5c;color:white;">
-
-        <h1 class="text center">Resume Screening AI base System</h1>
+        <h1 class="text center">Resume Screening AI based System</h1>
         <p>This system supports TXT and PDF files, to be uploaded and it will work on the following....</p>
         <ul>
             <li>Resume Categorization</li>
             <li>Resume Job Recommendation</li>
             <li>Resume Parsing (Information Extraction)</li>
         </ul>
-
-
     </div>
+
     <div class="container" style="background:#013a5c;color:white;">
         <h2>Upload Your Resume</h2>
         <form action="/pred" method="post" enctype="multipart/form-data">
@@ -72,33 +86,31 @@
             <input type="submit" value="Submit">
         </form>
 
-
         {% if message %}
         <p class="text-center">{{message}}</p>
         {% endif %}
 
         {% if predicted_category %}
-        <br>
-        <hr>
-        <br>
-        <p class="text-center"><b><strong>Category:</strong></b> {{predicted_category}}</p>
-        <p class="text-center"><b><strong>Recommended Job:</strong></b> {{recommended_job}}</p>
-        <br>
-        <hr>
+        <br><hr><br>
+        <p class="text-center"><strong>Category:</strong> {{predicted_category}}</p>
+        <p class="text-center"><strong>Recommended Job:</strong> {{recommended_job}}</p>
+        <br><hr>
         <h1 class="text-center">Extracted Information</h1>
-        <p class="text-center"><b><strong>Name:</strong></b> {{name}}</p>
-        <p class="text-center"><b><strong>Phone No:</strong></b> {{phone}}</p>
-        <p class="text-center"><b><strong>Email:</strong></b> {{email}}</p>
+        <p class="text-center"><strong>Name:</strong> {{name}}</p>
+        <p class="text-center"><strong>Phone No:</strong> {{phone}}</p>
+        <p class="text-center"><strong>Email:</strong> {{email}}</p>
+
         {% if extracted_skills %}
-        <p class="text-center"><b><strong>Skills</strong></b></p>
+        <p class="text-center"><strong>Skills</strong></p>
         <ul class="list-unstyled text-center">
             {% for skill in extracted_skills %}
             <li>{{ skill }}</li>
             {% endfor %}
         </ul>
         {% else %}
-        <p class="text-center">No skills founds.........</p>
-        <br>
+        <p class="text-center">No skills found.</p>
+        {% endif %}
+
         {% if extracted_education %}
         <h1 class="text-center">Education:</h1>
         <ul class="list-unstyled text-center">
@@ -107,14 +119,25 @@
             {% endfor %}
         </ul>
         {% else %}
-        <p class="text-center">No Education founds.........</p>
-        <br>
+        <p class="text-center">No education found.</p>
         {% endif %}
         {% endif %}
-        {% endif %}
-
     </div>
 
+    <div class="container" style="margin-top: 30px; background:#013a5c; color:white;">
+        <h2>Additional Tools</h2>
+
+        <form action="/bulk_rank" method="post">
+            <textarea name="job_description" placeholder="Enter Job Description for Ranking" required></textarea>
+            <input type="submit" value="Rank All Resumes">
+        </form>
+
+        <form action="/clear_database" method="post">
+            <input type="submit" value="Clear Resume Database">
+        </form>
+
+        <a href="/ranking_dashboard" class="button-link">View Ranking Dashboard</a>
+    </div>
 </body>
 
 </html>
